@@ -86,7 +86,7 @@ public Plugin myinfo =
 	name		= "Entity Output Info",
 	author		= "Botox, Addie, Dolly, .Rushaway",
 	description	= "Advanced entity output manipulation API",
-	version		= "1.2.3",
+	version		= "1.2.4",
 	url			= "https://github.com/srcdslab"
 };
 
