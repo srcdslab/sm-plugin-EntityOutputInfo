@@ -89,7 +89,7 @@ public Plugin myinfo =
 	name		= "Entity Output Info",
 	author		= "Botox, Addie, Dolly, .Rushaway",
 	description	= "Advanced entity output manipulation API",
-	version		= "1.2.5",
+	version		= "1.2.6",
 	url			= "https://github.com/srcdslab"
 };
 
@@ -973,7 +973,7 @@ int StringtToCharArray(Address addr, char[] buffer, int maxlen, bool allowNull =
 	{
 		char c = view_as<char>(LoadFromAddress(addr + view_as<Address>(i), NumberType_Int8));
 		if (c == '\0')
-			return i;
+			break;
 
 		buffer[i++] = c;
 	}
