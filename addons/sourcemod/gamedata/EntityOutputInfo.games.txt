@@ -13,6 +13,7 @@
             {
                 "library"    "server"
                 "linux"      "@_ZN12CEventActiondlEPv"
+                "linux64"    "@_ZN12CEventActiondlEPv"
                 "windows"    "\x55\x8B\xEC\x8B\x55\x08\x85\xD2\x74\x0B\x8B\x41\x10\xFF\x49\x0C"
             }
         }
@@ -23,7 +24,16 @@
             {
                 "library"    "server"
                 "linux"      "12"
+                "linux64"    "12"
                 "windows"    "11"
+            }
+            // sizeof(typedescription_t): depends on the pointer size and on the
+            // size of a member function pointer (inputfunc_t) for the compiler
+            "typedescription_t_size"
+            {
+                "linux"      "56"
+                "linux64"    "96"
+                "windows"    "52"
             }
         }
     }
