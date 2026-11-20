@@ -4,34 +4,37 @@
 #include <sourcemod>
 #include <sdktools>
 
+// Struct layouts depend on the pointer size: the offsets that move are variables
+// set by InitStructOffsets() (SM 1.13 cannot initialize a global Address).
+
 // datamap_t
 #define dataDesc_offset         view_as<Address>(0x00)
-#define dataNumFields_offset    view_as<Address>(0x04)
-#define baseMap_offset          view_as<Address>(0x0C)
+Address dataNumFields_offset;
+Address baseMap_offset;
 #define FTYPEDESC_OUTPUT        0x0010
 
 // typedescription_t
 #define fieldType_offset        view_as<Address>(0x00)
-#define fieldName_offset        view_as<Address>(0x04)
-#define flags_offset            view_as<Address>(0x12)
-#define typedescription_t_size  52
+Address fieldName_offset;
+Address flags_offset;
+// Differs per platform too (member function pointer size): read from gamedata
+int typedescription_t_size      = -1;
 
 // varianthax_t m_Value
 #define Union_Val_offset        view_as<Address>(0x00)
-#define fieldType_var_offset    view_as<Address>(0x10)
+Address fieldType_var_offset;
 
 // CBaseEntityOutput
 #define m_Value_offset          view_as<Address>(0x00)
-#define m_ActionList_offset     view_as<Address>(0x14)
+Address m_ActionList_offset;
 
 // CEventAction
 #define m_iTarget_offset        view_as<Address>(0x00)
-#define m_iTargetInput_offset   view_as<Address>(0x04)
-#define m_iParameter_offset     view_as<Address>(0x08)
-#define m_flDelay_offset        view_as<Address>(0x0C)
-#define m_nTimesToFire_offset   view_as<Address>(0x10)
-#define m_iIDStamp_offset       view_as<Address>(0x14)
-#define m_pNext_offset          view_as<Address>(0x18)
+Address m_iTargetInput_offset;
+Address m_iParameter_offset;
+Address m_flDelay_offset;
+Address m_nTimesToFire_offset;
+Address m_pNext_offset;
 
 /**
  * Field types used in Source Engine datamaps (fieldtype_t).
@@ -86,7 +89,7 @@ public Plugin myinfo =
 	name		= "Entity Output Info",
 	author		= "Botox, Addie, Dolly, .Rushaway",
 	description	= "Advanced entity output manipulation API",
-	version		= "1.2.4",
+	version		= "1.2.5",
 	url			= "https://github.com/srcdslab"
 };
 
@@ -399,6 +402,8 @@ int Native_GetOutputNames(Handle plugin, int params)
 
 public void OnPluginStart()
 {
+	InitStructOffsets();
+
 	GameData gd = new GameData("EntityOutputInfo.games");
 	if (gd == null)
 	{
@@ -418,16 +423,105 @@ public void OnPluginStart()
 
 		StartPrepSDKCall(SDKCall_Entity);
 		PrepSDKCall_SetFromConf(gd, SDKConf_Virtual, "CBaseEntity_GetDataDescMap");
+#if SOURCEMOD_V_MINOR >= 13
+		// A pointer does not fit in a cell on x64: SM 1.13 returns it through an Address (int64) argument
+		PrepSDKCall_SetReturnInfo(SDKType_Address, SDKPass_Plain);
+#else
 		PrepSDKCall_SetReturnInfo(SDKType_PlainOldData, SDKPass_Plain);
+#endif
 		g_hGetDataDescMap = EndPrepSDKCall();
 
-		if (g_hGetDataDescMap == null)
+		typedescription_t_size = gd.GetOffset("typedescription_t_size");
+
+		if (g_hGetDataDescMap == null || typedescription_t_size == -1)
 		{
-			LogError("Could not get a good SDKCall handle for CBaseEntity_GetDataDescMap, GetOutputNames will not work.");
+			delete g_hGetDataDescMap;
+			LogError("Could not get a good SDKCall handle for CBaseEntity_GetDataDescMap or the typedescription_t size, GetOutputNames will not work.");
 		}
 
 		delete gd;
 	}
+}
+
+// 32-bit struct offsets, or the 64-bit ones (pointers and string_t are 8 bytes, aligned on 8)
+void InitStructOffsets()
+{
+	// datamap_t
+	dataNumFields_offset  = view_as<Address>(0x04);
+	baseMap_offset        = view_as<Address>(0x0C);
+
+	// typedescription_t
+	fieldName_offset      = view_as<Address>(0x04);
+	flags_offset          = view_as<Address>(0x12);
+
+	// varianthax_t m_Value
+	fieldType_var_offset  = view_as<Address>(0x10);
+
+	// CBaseEntityOutput
+	m_ActionList_offset   = view_as<Address>(0x14);
+
+	// CEventAction (m_iIDStamp is at 0x14)
+	m_iTargetInput_offset = view_as<Address>(0x04);
+	m_iParameter_offset   = view_as<Address>(0x08);
+	m_flDelay_offset      = view_as<Address>(0x0C);
+	m_nTimesToFire_offset = view_as<Address>(0x10);
+	m_pNext_offset        = view_as<Address>(0x18);
+
+#if SOURCEMOD_V_MINOR >= 13
+	if (Address_PointerSize != view_as<Address>(8))
+		return;
+
+	// datamap_t
+	dataNumFields_offset  = view_as<Address>(0x08);
+	baseMap_offset        = view_as<Address>(0x18);
+
+	// typedescription_t
+	fieldName_offset      = view_as<Address>(0x08);
+	flags_offset          = view_as<Address>(0x1A);
+
+	// varianthax_t m_Value
+	fieldType_var_offset  = view_as<Address>(0x14);
+
+	// CBaseEntityOutput
+	m_ActionList_offset   = view_as<Address>(0x18);
+
+	// CEventAction (m_iIDStamp is at 0x20)
+	m_iTargetInput_offset = view_as<Address>(0x08);
+	m_iParameter_offset   = view_as<Address>(0x10);
+	m_flDelay_offset      = view_as<Address>(0x18);
+	m_nTimesToFire_offset = view_as<Address>(0x1C);
+	m_pNext_offset        = view_as<Address>(0x28);
+#endif
+}
+
+// Reads a pointer-sized value (SM 1.12 only knows 32-bit pointers)
+Address LoadPointer(Address addr)
+{
+#if SOURCEMOD_V_MINOR >= 13
+	return LoadAddressFromAddress(addr);
+#else
+	return view_as<Address>(LoadFromAddress(addr, NumberType_Int32));
+#endif
+}
+
+void StorePointer(Address addr, Address value)
+{
+#if SOURCEMOD_V_MINOR >= 13
+	StoreAddressToAddress(addr, value);
+#else
+	StoreToAddress(addr, view_as<int>(value), NumberType_Int32);
+#endif
+}
+
+Address GetDataDescMap(int entity)
+{
+#if SOURCEMOD_V_MINOR >= 13
+	Address datamap = Address_Null;
+	SDKCall(g_hGetDataDescMap, entity, datamap);
+	return datamap;
+#else
+	return SDKCall(g_hGetDataDescMap, entity);
+#endif
 }
 
 char[] GetEntityName(int entity)
@@ -452,7 +546,7 @@ Address GetActionAtIndex(Address outputAddr, int index)
 		if (count == index)
 			return actionList;
 
-		actionList = LoadFromAddress(actionList + m_pNext_offset, NumberType_Int32);
+		actionList = LoadPointer(actionList + m_pNext_offset);
 		count++;
 	}
 
@@ -474,7 +568,7 @@ Address GetOutputAddress(int entity, const char[] output)
 
 Address GetOutputActionList(Address outputAddr)
 {
-	return LoadFromAddress(outputAddr + m_ActionList_offset, NumberType_Int32);
+	return LoadPointer(outputAddr + m_ActionList_offset);
 }
 
 int GetOutputCount(int entity, const char[] output)
@@ -490,7 +584,7 @@ int GetOutputCount(int entity, const char[] output)
 	int count = 0;
 	while (actionList)
 	{
-		actionList = LoadFromAddress(actionList + m_pNext_offset, NumberType_Int32);
+		actionList = LoadPointer(actionList + m_pNext_offset);
 		count++;
 	}
 
@@ -507,7 +601,7 @@ int GetOutputTarget(int entity, const char[] output, int index, char[] target, i
 	if (!action)
 		return 0;
 
-	Address m_iTarget = LoadFromAddress(action + m_iTarget_offset, NumberType_Int32);
+	Address m_iTarget = LoadPointer(action + m_iTarget_offset);
 	return StringtToCharArray(m_iTarget, target, maxlen, true);
 }
 
@@ -521,7 +615,7 @@ int GetOutputTargetInput(int entity, const char[] output, int index, char[] targ
 	if (!action)
 		return 0;
 
-	Address m_iTargetInput = LoadFromAddress(action + m_iTargetInput_offset, NumberType_Int32);
+	Address m_iTargetInput = LoadPointer(action + m_iTargetInput_offset);
 	return StringtToCharArray(m_iTargetInput, targetInput, maxlen, true);
 }
 
@@ -535,7 +629,7 @@ int GetOutputParameter(int entity, const char[] output, int index, char[] parame
 	if (!action)
 		return 0;
 
-	Address m_iParameter = LoadFromAddress(action + m_iParameter_offset, NumberType_Int32);
+	Address m_iParameter = LoadPointer(action + m_iParameter_offset);
 	return StringtToCharArray(m_iParameter, parameter, maxlen, true);
 }
 
@@ -625,7 +719,7 @@ int GetOutputValueString(int entity, const char[] output, char[] value, int maxl
 	{
 		case FIELD_CHARACTER, FIELD_STRING, FIELD_MODELNAME, FIELD_SOUNDNAME:
 		{
-			Address unionVal = LoadFromAddress(outputAddr + Union_Val_offset, NumberType_Int32);
+			Address unionVal = LoadPointer(outputAddr + Union_Val_offset);
 			return StringtToCharArray(unionVal, value, maxlen, true);
 		}
 	}
@@ -655,11 +749,11 @@ int FindOutput(int entity, const char[] output, int startIndex, const char[] tar
 		}
 
 		Address oldActionList = actionList;
-		actionList = LoadFromAddress(actionList + m_pNext_offset, NumberType_Int32);
+		actionList = LoadPointer(actionList + m_pNext_offset);
 
 		if (target[0])
 		{
-			Address m_iTarget = LoadFromAddress(oldActionList + m_iTarget_offset, NumberType_Int32);
+			Address m_iTarget = LoadPointer(oldActionList + m_iTarget_offset);
 
 			char thisTarget[64];
 			StringtToCharArray(m_iTarget, thisTarget, sizeof(thisTarget), true);
@@ -670,7 +764,7 @@ int FindOutput(int entity, const char[] output, int startIndex, const char[] tar
 
 		if (targetInput[0])
 		{
-			Address m_iTargetInput = LoadFromAddress(oldActionList + m_iTargetInput_offset, NumberType_Int32);
+			Address m_iTargetInput = LoadPointer(oldActionList + m_iTargetInput_offset);
 
 			char thisTargetInput[64];
 			StringtToCharArray(m_iTargetInput, thisTargetInput, sizeof(thisTargetInput), true);
@@ -681,7 +775,7 @@ int FindOutput(int entity, const char[] output, int startIndex, const char[] tar
 
 		if (parameter[0])
 		{
-			Address m_iParameter = LoadFromAddress(oldActionList + m_iParameter_offset, NumberType_Int32);
+			Address m_iParameter = LoadPointer(oldActionList + m_iParameter_offset);
 
 			char thisParameter[256];
 			StringtToCharArray(m_iParameter, thisParameter, sizeof(thisParameter), true);
@@ -741,7 +835,7 @@ bool DeleteOutput(int entity, const char[] output, int index)
 		}
 
 		prevEvent = actionList;
-		actionList = LoadFromAddress(prevEvent + m_pNext_offset, NumberType_Int32);
+		actionList = LoadPointer(prevEvent + m_pNext_offset);
 		count++;
 	}
 
@@ -749,9 +843,9 @@ bool DeleteOutput(int entity, const char[] output, int index)
 		return false;
 
 	if (prevEvent != Address_Null)
-		StoreToAddress(prevEvent + m_pNext_offset, LoadFromAddress(curEvent + m_pNext_offset, NumberType_Int32), NumberType_Int32);
+		StorePointer(prevEvent + m_pNext_offset, LoadPointer(curEvent + m_pNext_offset));
 	else
-		StoreToAddress(outputAddr + m_ActionList_offset, LoadFromAddress(curEvent + m_pNext_offset, NumberType_Int32), NumberType_Int32);
+		StorePointer(outputAddr + m_ActionList_offset, LoadPointer(curEvent + m_pNext_offset));
 
 	SDKCall(g_hDeleteElement, curEvent, curEvent);
 	return true;
@@ -775,12 +869,12 @@ int DeleteAllOutputs(int entity, const char[] output)
 
 	int count = 0;
 	Address nextEvent = actionList;
-	StoreToAddress(outputAddr + m_ActionList_offset, 0, NumberType_Int32);
+	StorePointer(outputAddr + m_ActionList_offset, Address_Null);
 
 	while (nextEvent)
 	{
 		Address thisEvent = nextEvent;
-		nextEvent = LoadFromAddress(nextEvent + m_pNext_offset, NumberType_Int32);
+		nextEvent = LoadPointer(nextEvent + m_pNext_offset);
 		SDKCall(g_hDeleteElement, thisEvent, thisEvent);
 		count++;
 	}
@@ -798,15 +892,15 @@ int GetOutputFormatted(int entity, const char[] output, int index, char[] format
 	if (!action)
 		return 0;
 
-	Address m_iTarget = LoadFromAddress(action + m_iTarget_offset, NumberType_Int32);
+	Address m_iTarget = LoadPointer(action + m_iTarget_offset);
 	char thisTarget[64];
 	StringtToCharArray(m_iTarget, thisTarget, sizeof(thisTarget), true);
 
-	Address m_iTargetInput = LoadFromAddress(action + m_iTargetInput_offset, NumberType_Int32);
+	Address m_iTargetInput = LoadPointer(action + m_iTargetInput_offset);
 	char thisTargetInput[64];
 	StringtToCharArray(m_iTargetInput, thisTargetInput, sizeof(thisTargetInput), true);
 
-	Address m_iParameter = LoadFromAddress(action + m_iParameter_offset, NumberType_Int32);
+	Address m_iParameter = LoadPointer(action + m_iParameter_offset);
 	char thisParameter[256];
 	StringtToCharArray(m_iParameter, thisParameter, sizeof(thisParameter), true);
 
@@ -822,13 +916,13 @@ int GetOutputNames(int entity, int index, char[] output, int maxlen)
 	if (g_hGetDataDescMap == null)
 		ThrowError("Invalid SDKCall Handle, cannot get output names");
 
-	Address datamap_t = SDKCall(g_hGetDataDescMap, entity);
+	Address datamap_t = GetDataDescMap(entity);
 	if (!datamap_t)
 		return 0;
 
-	for (int count = 0; datamap_t; datamap_t = LoadFromAddress(datamap_t + baseMap_offset, NumberType_Int32))
+	for (int count = 0; datamap_t; datamap_t = LoadPointer(datamap_t + baseMap_offset))
 	{
-		Address dataDesc = LoadFromAddress(datamap_t + dataDesc_offset, NumberType_Int32);
+		Address dataDesc = LoadPointer(datamap_t + dataDesc_offset);
 		int dataNumFields = LoadFromAddress(datamap_t + dataNumFields_offset, NumberType_Int32);
 		for (int i = 0; i < dataNumFields; i++)
 		{
@@ -844,7 +938,7 @@ int GetOutputNames(int entity, int index, char[] output, int maxlen)
 
 			if (index == count)
 			{
-				Address fieldNameAddr = LoadFromAddress(typedescription_t + fieldName_offset, NumberType_Int32);
+				Address fieldNameAddr = LoadPointer(typedescription_t + fieldName_offset);
 				return StringtToCharArray(fieldNameAddr, output, maxlen, true);
 			}
 
